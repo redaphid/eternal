@@ -35,11 +35,26 @@ function panic -a msg
     exit 1
 end
 
+function confirm -a question -d "ask user for confirmation. status code"
+    while true
+        read -l -P "$question [y/N] " confirm
+        switch $confirm
+            case Y y
+                return 0
+            case '' N n
+                return 1
+        end
+    end
+end
+
 function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
     string length -q $source_disk; or panic "must specify a source disk!"
+    echo "Source: $source_disk"
     string length -q $target_disk; or panic "must specify a target disk!"
+    echo "Target: $target_disk"
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
-
+    confirm "Wanna do this?"; or exit 1
+    echo "Let's go!"
 end
 status is-interactive; or main $argv
 #zpool export bpool
