@@ -68,7 +68,7 @@ end
 
 function disk_status -a disk -d "*might* print partitions on disk, update kernel"
     not_empty $disk; or panic "must specify a disk!"
-    partprobe
+    # partprobe
     ls $disk*
 end
 
@@ -78,7 +78,6 @@ function prep_new_disk -a destination_disk source_partition -d "wipe the disk, a
     confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
     sgdisk --zap-all $destination_disk
     echo "zapped"
-    
     disk_status $destination_disk
 
     set partition_number 1
@@ -134,6 +133,16 @@ function _nooooo -a source_partition -a target_disk -d "Format the drive. Replac
     zpool clear bpool
 end
 
+function create_pool -a name disk partition
+    confirm "A fancy version of: zpool create $name $disk-part$partition?"; or panic "nope"
+    zpool create \
+        -o ashift=12 \
+        -O acltype=posixacl -O canmount=noauto -O compression=lz4 \
+        -O dnodesize=auto -O normalization=formD -O relatime=on \
+        -O xattr=sa -O mountpoint=none $name $disk-part$partition
+
+end
+
 function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
     not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
@@ -156,10 +165,24 @@ function main -a source_disk target_disk -d "Eternal-ify from source->target dis
         join_pool bpool $boot_pool_disk $target_disk 2
     end
 
-    # confirm "Join root pool on partition 3?"; and begin
-    #     echo "Joining root pool"
-    #     join_root_pool $target_disk 3
-    # end
+    confirm "Join root pool on partition 3?"; and begin
+        echo "Joining root pool"
+        join_root_pool $target_disk 3
+    end
+
+    confirm "Create new root instead?"; and begin
+        create_pool nupool $target_disk 3
+
+        zfs create -o canmount=off -o mountpoint=none nupool/ROOT
+        echo "root..."
+        zfs send rpool/ROOT/eternal@eternity-begins-here | pv | zfs recv nupool/ROOT/eternal
+        zfs list | grep nupool
+
+        echo "usr..."
+        zfs send -R rpool/ROOT/eternal/usr@eternity-begins-here | pv | zfs recv nupool/ROOT/eternal/usr
+        zfs list | grep nupool
+        
+    end
 
 end
 
