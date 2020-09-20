@@ -75,7 +75,7 @@ end
 function prep_new_disk -a destination_disk source_partition -d "wipe the disk, and put our partitions on it."
     not_empty $destination_disk; or panic "must specify a destination disk!"
     # not_empty $source_partion; or echo "no source partition; won't blindly copy"
-    confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
+    # confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
     sgdisk --zap-all $destination_disk
     echo "zapped"
     disk_status $destination_disk
@@ -135,7 +135,7 @@ end
 
 function create_pool -a name disk partition
     confirm "A fancy version of: zpool create $name $disk-part$partition?"; or panic "nope"
-    zpool create \
+    zpool create -f \
         -o ashift=12 \
         -O acltype=posixacl -O canmount=noauto -O compression=lz4 \
         -O dnodesize=auto -O normalization=formD -O relatime=on \
@@ -143,18 +143,22 @@ function create_pool -a name disk partition
 
 end
 
-function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
+function main -a source_disk target_disk source_dataset source_snapshot -d "Eternal-ify from source->target disk"
     not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
     set -e source_disk #hide variable to prevent accidental writing of entire disk
-
+    
     echo "Source boot partition: $source_partition $source_disk"
     not_empty $target_disk; or panic "must specify a target disk!"
     echo "Target: $target_disk"
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
     echo "Let's go!"
-    
+
+    zpool export nupool
+    zpool detach bpool $target_disk-part2
+    zpool detach rpool $target_disk-part3
+
     confirm "Format the disk?"; and begin
         echo "gonna format the disk"
         prep_new_disk $target_disk $source_partition
@@ -170,23 +174,41 @@ function main -a source_disk target_disk -d "Eternal-ify from source->target dis
         join_root_pool $target_disk 3
     end
 
-    confirm "Create new root instead?"; and begin
+    not_empty $source_snapshot; or set source_snapshot eternity-begins-here
+    not_empty $source_dataset; or set source_dataset rpool/ROOT/eternity
+    
+    confirm "Create new root instead? (from $source_dataset@$source_snapshot"; and begin
         create_pool nupool $target_disk 3
-
+        zpool export nupool
+        zpool import -N -R /mnt/nupool nupool
+        
         zfs create -o canmount=off -o mountpoint=none nupool/ROOT
+
         echo "root..."
-        zfs send rpool/ROOT/eternal@eternity-begins-here | pv | zfs recv nupool/ROOT/eternal
+        zfs send $source_dataset@$source_snapshot | pv | zfs recv -x mountpoint -o canmount=noauto nupool/ROOT/eternal
         zfs list | grep nupool
 
         echo "usr..."
-        zfs send -R rpool/ROOT/eternal/usr@eternity-begins-here | pv | zfs recv nupool/ROOT/eternal/usr
+        zfs send -R $source_dataset/usr@$source_snapshot | pv | zfs recv -x mountpoint nupool/ROOT/eternal/usr
         zfs list | grep nupool
+
+        echo "var..."
+        zfs send $source_dataset/var@$source_snapshot | pv | zfs recv -x mountpoint nupool/ROOT/eternal/var
+        zfs list | grep nupool
+
+        echo "var/lib..."
+        zfs send -R $source_dataset/var/lib@$source_snapshot | pv | zfs recv -x mountpoint nupool/ROOT/eternal/var/lib
+        zfs list | grep nupool
+
+        zfs create nupool/ROOT/eternal/var/log
+        zfs create nupool/ROOT/eternal/var/snap
+        zfs create nupool/ROOT/eternal/var/spool
         
     end
 
 end
 
-status is-interactive; or main $argv
+status is-interactive; or main $SOURCE_DISK $TARGET_DISK $SOURCE_DATASET
 #zpool export bpool
 
 #sudo apt install refind
