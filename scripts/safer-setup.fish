@@ -63,6 +63,9 @@ function format_efi_partition -a destination_disk partition_number -a source_par
         pv < $source_partition > $destination_partition
     end
 
+    parted --script $target_disk name 1 EFI
+    # mkdir /mnt/new-efi
+    # mount $destination_partition /mnt/new-efi    
     echo "EFI partition done."
 end
 
@@ -168,10 +171,10 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
         prep_new_disk $target_disk $source_partition
     end
     
-    confirm "Join boot pool on partition 2?"; and begin
-        echo "Joining boot pool"
-        join_pool bpool $boot_pool_disk $target_disk 2
-    end
+    # confirm "Join boot pool on partition 2?"; and begin
+    #     echo "Joining boot pool"
+    #     join_pool bpool $boot_pool_disk $target_disk 2
+    # end
 
     # confirm "Join root pool on partition 3?"; and begin
         # echo "Joining root pool"
@@ -185,7 +188,7 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
     not_empty $source_dataset; or set source_dataset rpool/ROOT/eternity
 
     confirm "Create new root instead? (from $source_dataset@$source_snapshot"; and begin
-        create_pool nupool $target_disk 3
+        create_pool nupool $target_disk 2
         zpool export nupool
         zpool import -N -R /mnt/nupool nupool
         
@@ -216,7 +219,7 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
         zfs set mountpoint=/ nupool/ROOT/eternal
         zfs list -o name,mountpoint,canmount | grep nupool
         zpool export nupool
-        echo "you're good to go!"
+        echo "and you're good to go!"
     end
 
 end
