@@ -144,13 +144,17 @@ function create_pool -a name disk partition
 end
 
 function main -a source_disk target_disk source_dataset source_snapshot -d "Eternal-ify from source->target disk"
+    echo "env: $SOURCE_DISK $TARGET_DISK $SOURCE_DATASET $SOURCE_SNAPSHOT"
+    not_empty $source_disk; or set source_disk $SOURCE_DISK
     not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
     set -e source_disk #hide variable to prevent accidental writing of entire disk
-    
     echo "Source boot partition: $source_partition $source_disk"
+
+    not_empty $target_disk; or set target_disk $TARGET_DISK
     not_empty $target_disk; or panic "must specify a target disk!"
     echo "Target: $target_disk"
+
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
     echo "Let's go!"
@@ -169,31 +173,36 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
         join_pool bpool $boot_pool_disk $target_disk 2
     end
 
-    confirm "Join root pool on partition 3?"; and begin
-        echo "Joining root pool"
-        join_root_pool $target_disk 3
-    end
+    # confirm "Join root pool on partition 3?"; and begin
+        # echo "Joining root pool"
+        # join_root_pool $target_disk 3
+    # end
 
+    not_empty $source_snapshot; or set source_snapshot $SOURCE_SNAPSHOT
     not_empty $source_snapshot; or set source_snapshot eternity-begins-here
+
+    not_empty $source_dataset; or set source_dataset $SOURCE_DATASET
     not_empty $source_dataset; or set source_dataset rpool/ROOT/eternity
-    
+
     confirm "Create new root instead? (from $source_dataset@$source_snapshot"; and begin
         create_pool nupool $target_disk 3
         zpool export nupool
         zpool import -N -R /mnt/nupool nupool
         
         zfs create -o canmount=off -o mountpoint=none nupool/ROOT
-
+        
         echo "root..."
         zfs send $source_dataset@$source_snapshot | pv | zfs recv -x mountpoint -o canmount=noauto nupool/ROOT/eternal
         zfs list | grep nupool
 
         echo "usr..."
         zfs send -R $source_dataset/usr@$source_snapshot | pv | zfs recv -x mountpoint nupool/ROOT/eternal/usr
+        zfs set canmount=off nupool/ROOT/eternal/usr
         zfs list | grep nupool
 
         echo "var..."
         zfs send $source_dataset/var@$source_snapshot | pv | zfs recv -x mountpoint nupool/ROOT/eternal/var
+        zfs set canmount=off nupool/ROOT/eternal/var
         zfs list | grep nupool
 
         echo "var/lib..."
@@ -203,12 +212,16 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
         zfs create nupool/ROOT/eternal/var/log
         zfs create nupool/ROOT/eternal/var/snap
         zfs create nupool/ROOT/eternal/var/spool
-        
+
+        zfs set mountpoint=/ nupool/ROOT/eternal
+        zfs list -o name,mountpoint,canmount | grep nupool
+        zpool export nupool
+        echo "you're good to go!"
     end
 
 end
 
-status is-interactive; or main $SOURCE_DISK $TARGET_DISK $SOURCE_DATASET
+status is-interactive; or main $argv
 #zpool export bpool
 
 #sudo apt install refind
