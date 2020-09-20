@@ -3,23 +3,19 @@
 set EFI_PARTITION_TYPE EF00
 set _ZFS_PARTITION_TYPE BE00
 
-function empty -a variable -d "checks if a value is empty"
-     not string length $variable > /dev/null
-end
-
-function not_empty -a variable -d "checks if a value is not empty"
-    not empty $variable
+function not_empty -a variable -d "checks if a value is empty"
+    string length -q -- $variable
 end
 
 function format_efi_partition -a destination_disk partition_number -a source_partition size -d "allocate and format EFI Partition."
-    not_empty $destination_disk; or panic "must specify a destination disk!"
-    not_empty $partition_number; or panic "must specify a destination partition_number!"
-    not_empty $source_partition; and set copy_source true
+    not empty $destination_disk; or panic "must specify a destination disk!"
+    not empty $partition_number; or panic "must specify a destination partition_number!"
+    not empty $source_partition; and set copy_source true
 
     set destination_partition $destination_disk-part1
     set -e destination_disk #hide variable to prevent accidental writing of entire partition
     
-    not_empty $size; or begin
+    not empty $size; or begin
         set size "512M"
         echo "Setting EFI size to the default of $size"
     end
@@ -35,8 +31,8 @@ function format_efi_partition -a destination_disk partition_number -a source_par
 end
 
 function prep_new_disk -a destination_disk source_partition -d "wipe the disk, and put our partitions on it."
-    not_empty $destination_disk; or panic "must specify a destination disk!"
-    not_empty $source_partion; or echo "no source partition; won't blindly copy"
+    not empty $destination_disk; or panic "must specify a destination disk!"
+    not empty $source_partion; or echo "no source partition; won't blindly copy"
     confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
     sgdisk --zap-all $destination_disk
     echo "zapped"
@@ -107,12 +103,12 @@ function confirm -a question -d "ask user for confirmation. status code"
 end
 
 function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
-    not_empty $source_disk; or panic "must specify a source disk!"    
+    not empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
     set -e source_disk #hide variable to prevent accidental writing of entire disk
 
     echo "Source boot partition: $source_partition $source_disk"
-    not_empty $target_disk; or panic "must specify a target disk!"
+    not empty $target_disk; or panic "must specify a target disk!"
     echo "Target: $target_disk"
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
