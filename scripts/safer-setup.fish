@@ -2,26 +2,41 @@
 
 set EFI_PARTITION_TYPE EF00
 set _ZFS_PARTITION_TYPE BE00
-function format_efi_partition -a destination_disk partition_number size -d "allocate and format EFI Partition."
-    string length -q partition_number; or panic "must specify a destination disk!"
-    string length -q destination_disk; or panic "must specify a destination partition!"
+
+function empty -a variable -d "checks if a value is empty"
+     not string length $variable > /dev/null
+end
+
+function not_empty -a variable -d "checks if a value is not empty"
+    not empty $variable
+end
+
+function format_efi_partition -a destination_disk partition_number -a source_partition size -d "allocate and format EFI Partition."
+    not_empty $destination_disk; or panic "must specify a destination disk!"
+    not_empty $partition_number; or panic "must specify a destination partition_number!"
+    not_empty $source_partition; and set copy_source true
 
     set destination_partition $destination_disk-part1
-    set -e destination_disk
+    set -e destination_disk #hide variable to prevent accidental writing of entire partition
     
-    string length -q $size; or begin
+    not_empty $size; or begin
         set size "512M"
         echo "Setting EFI size to the default of $size"
     end
-    confirm "EFI Formatting $destination_partition ($size). Sound good?" or panic "Aborted EFI formatting"
 
-    sgdisk -n1:1M:+512M -t1:$EFI_PARTITION_TYPE $target_disk #EFI
+    confirm "EFI Formatting $destination_partition ($size). Sound good?"; or panic "Aborted EFI formatting"
+
+    sgdisk -n1:1M:+512M -t1:$EFI_PARTITION_TYPE $target_disk; or panic "efi failed" #EFIz
+
+    
+    pv <$SRC_DISK-part1 >$DISK-part1
     parted --script $destination_disk name 1 EFI
     echo "EFI partition done."
 end
 
-function prep_new_disk -a destination_disk -d "wipe the disk, and put our partitions on it."
-    string length -q $destination_disk; or panic "must specify a destination disk!"
+function prep_new_disk -a destination_disk source_partition -d "wipe the disk, and put our partitions on it."
+    not_empty $destination_disk; or panic "must specify a destination disk!"
+    not_empty $source_partion; or echo "no source partition; won't blindly copy"
     confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
     sgdisk --zap-all $destination_disk
     echo "zapped"
@@ -29,24 +44,24 @@ function prep_new_disk -a destination_disk -d "wipe the disk, and put our partit
     set partition_number 1
     
     confirm "EFI partition on $partition_number?"; and begin
-        format_efi_partition $destination_disk $partition_number
+        format_efi_partition $destination_disk $partition_number $source_partition
         echo "EFI done."
         set partition_number (math $partition_number + 1)
     end
     
     confirm "boot pool on $partition_number?"; and begin
-        sgdisk -n$partition_number:0:+2G -t$partition_number:$ZFS_PARTITION_TYPE $destination_disks #boot pool
+        sgdisk -n$partition_number:0:+2G -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk or panic "bpool format failed" #boot pool
         set partition_number (math $partition_number + 1)
     end
 
     confirm "root pool on $partition_number?"; and begin
-        sgdisk -n$partition_number:0:0 -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk #zfs main
+        sgdisk -n$partition_number:0:0 -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk or panic "rpool format failed" #zfs main
     end
 end
 
-function format_partitions -a source_disk -a target_disk -d "Format the drive. Replace partition table"
+function _nooooo -a source_partition -a target_disk -d "Format the drive. Replace partition table"
+    panic "don't run me"
     zpool import -N bpool
-    set source_partition "$source_disk-part1" #safer than assuming it's a partition.
 
     sgdisk --zap-all $target_disk #format
     sgdisk -n1:1M:+512M -t1:EF00 $target_disk #EFI
@@ -92,16 +107,17 @@ function confirm -a question -d "ask user for confirmation. status code"
 end
 
 function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
-    string length -q $source_disk; or panic "must specify a source disk!"    
+    not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
-    set -e source_disk
+    set -e source_disk #hide variable to prevent accidental writing of entire disk
+
     echo "Source boot partition: $source_partition $source_disk"
-    string length -q $target_disk; or panic "must specify a target disk!"
+    not_empty $target_disk; or panic "must specify a target disk!"
     echo "Target: $target_disk"
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
     echo "Let's go!"
-
+    prep_new_disk $target_disk $source_partition
 
 end
 status is-interactive; or main $argv
