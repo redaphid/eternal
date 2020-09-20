@@ -7,15 +7,34 @@ function not_empty -a variable -d "checks if a value is empty"
     string length -q -- $variable
 end
 
+function panic -a msg
+    set_color red
+    echo $argv 1>&2
+    set_color normal
+    exit 1
+end
+
+function confirm -a question -d "ask user for confirmation. status code"
+    while true
+        read -l -P "$question [y/N] " confirm
+        switch $confirm
+            case Y y
+                return 0
+            case '' N n
+                return 1
+        end
+    end
+end
+
 function format_efi_partition -a destination_disk partition_number -a source_partition size -d "allocate and format EFI Partition."
-    not empty $destination_disk; or panic "must specify a destination disk!"
-    not empty $partition_number; or panic "must specify a destination partition_number!"
-    not empty $source_partition; and set copy_source true
+    not_empty $destination_disk; or panic "must specify a destination disk!"
+    not_empty $partition_number; or panic "must specify a destination partition_number!"
+    not_empty $source_partition; and set copy_source true
 
     set destination_partition $destination_disk-part1
     set -e destination_disk #hide variable to prevent accidental writing of entire partition
     
-    not empty $size; or begin
+    not_empty $size; or begin
         set size "512M"
         echo "Setting EFI size to the default of $size"
     end
@@ -31,8 +50,8 @@ function format_efi_partition -a destination_disk partition_number -a source_par
 end
 
 function prep_new_disk -a destination_disk source_partition -d "wipe the disk, and put our partitions on it."
-    not empty $destination_disk; or panic "must specify a destination disk!"
-    not empty $source_partion; or echo "no source partition; won't blindly copy"
+    not_empty $destination_disk; or panic "must specify a destination disk!"
+    not_empty $source_partion; or echo "no source partition; won't blindly copy"
     confirm "about to destroy $destination_disk. We good?"; or panic "We weren't good."
     sgdisk --zap-all $destination_disk
     echo "zapped"
@@ -83,32 +102,13 @@ function _nooooo -a source_partition -a target_disk -d "Format the drive. Replac
     zpool clear bpool
 end
 
-function panic -a msg
-    set_color red
-    echo $argv 1>&2
-    set_color normal
-    exit 1
-end
-
-function confirm -a question -d "ask user for confirmation. status code"
-    while true
-        read -l -P "$question [y/N] " confirm
-        switch $confirm
-            case Y y
-                return 0
-            case '' N n
-                return 1
-        end
-    end
-end
-
 function main -a source_disk target_disk -d "Eternal-ify from source->target disk"
-    not empty $source_disk; or panic "must specify a source disk!"    
+    not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
     set -e source_disk #hide variable to prevent accidental writing of entire disk
 
     echo "Source boot partition: $source_partition $source_disk"
-    not empty $target_disk; or panic "must specify a target disk!"
+    not_empty $target_disk; or panic "must specify a target disk!"
     echo "Target: $target_disk"
     string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
