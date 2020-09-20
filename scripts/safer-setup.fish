@@ -63,10 +63,20 @@ function format_efi_partition -a destination_disk partition_number -a source_par
         pv < $source_partition > $destination_partition
     end
 
-    parted --script $target_disk name 1 EFI
+    parted --script $destination_disk name 1 EFI
     # mkdir /mnt/new-efi
     # mount $destination_partition /mnt/new-efi    
     echo "EFI partition done."
+end
+
+function chroot_into_new -d "for reference"
+    cd /mnt/nupool
+    zpool import nuboot -R /mnt/nupool/boot
+    mount --rbind /dev ./dev
+    mount --rbind /proc ./proc
+    mount --rbind /sys ./sys
+    chroot . fish --login
+
 end
 
 function disk_status -a disk -d "*might* print partitions on disk, update kernel"
@@ -88,13 +98,15 @@ function prep_new_disk -a destination_disk source_partition -d "wipe the disk, a
     confirm "EFI partition on $partition_number?"; and begin
         format_efi_partition $destination_disk $partition_number $source_partition
         echo "EFI done."
+        parted --script $destination_disk name $partition_number EFI
         set partition_number (math $partition_number + 1)
     end
     
     disk_status $destination_disk
 
     confirm "boot pool on $partition_number?"; and begin
-        sgdisk -n$partition_number:0:+2G -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk or panic "bpool format failed" #boot pool    
+        sgdisk -n$partition_number:0:+2G -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk or panic "bpool format failed" #boot pool
+        parted --script $destination_disk name $partition_number boot    
         set partition_number (math $partition_number + 1)
     end
 
@@ -102,35 +114,36 @@ function prep_new_disk -a destination_disk source_partition -d "wipe the disk, a
 
     confirm "root pool on $partition_number?"; and begin
         sgdisk -n$partition_number:0:0 -t$partition_number:$ZFS_PARTITION_TYPE $destination_disk or panic "rpool format failed" #zfs main
+        parted --script $destination_disk name $partition_number root
     end
 
     disk_status $destination_disk
 
 end
 
-function _nooooo -a source_partition -a target_disk -d "Format the drive. Replace partition table"
+function _nooooo -a source_partition -a destination_disk -d "Format the drive. Replace partition table"
     panic "don't run me"
     zpool import -N bpool
 
-    sgdisk --zap-all $target_disk #format
-    sgdisk -n1:1M:+512M -t1:EF00 $target_disk #EFI
-    sgdisk -n2:0:+2G -t2:BE00 $target_disk #boot pool
-    sgdisk -n3:0:0 -t3:BF00 $target_disk #zfs main
-    pv <$SRC_DISK-part1 >$target_disk-part1
-    # pv < $SRC_DISK-part2 > $target_disk-part2
-    parted --script $target_disk name 1 EFI
+    sgdisk --zap-all $destination_disk #format
+    sgdisk -n1:1M:+512M -t1:EF00 $destination_disk #EFI
+    sgdisk -n2:0:+2G -t2:BE00 $destination_disk #boot pool
+    sgdisk -n3:0:0 -t3:BF00 $destination_disk #zfs main
+    pv <$SRC_DISK-part1 >$destination_disk-part1
+    # pv < $SRC_DISK-part2 > $destination_disk-part2
+    parted --script $destination_disk name 1 EFI
 
     zpool list -v -H -P
-    zpool attach bpool $SRC_DISK-part2 $target_disk-part2
-    zpool attach rpool $SRC_DISK-part3 $target_disk-part3
+    zpool attach bpool $SRC_DISK-part2 $destination_disk-part2
+    zpool attach rpool $SRC_DISK-part3 $destination_disk-part3
     watch zpool status #wait...
 
 
-    zpool offline bpool $target_disk-part2
-    zpool offline rpool $target_disk-part3
+    zpool offline bpool $destination_disk-part2
+    zpool offline rpool $destination_disk-part3
 
-    zpool detach bpool $target_disk-part2
-    zpool detach rpool $target_disk-part3
+    zpool detach bpool $destination_disk-part2
+    zpool detach rpool $destination_disk-part3
 
     zpool clear rpool
     zpool clear bpool
@@ -143,42 +156,43 @@ function create_pool -a name disk partition
         -O acltype=posixacl -O canmount=noauto -O compression=lz4 \
         -O dnodesize=auto -O normalization=formD -O relatime=on \
         -O xattr=sa -O mountpoint=none $name $disk-part$partition
-
 end
 
-function main -a source_disk target_disk source_dataset source_snapshot -d "Eternal-ify from source->target disk"
-    echo "env: $SOURCE_DISK $TARGET_DISK $SOURCE_DATASET $SOURCE_SNAPSHOT"
+function main -a source_disk destination_disk source_dataset source_snapshot -d "Eternal-ify from source->target disk"
+    echo "env: $SOURCE_DISK $destination_disk $SOURCE_DATASET $SOURCE_SNAPSHOT"
     not_empty $source_disk; or set source_disk $SOURCE_DISK
     not_empty $source_disk; or panic "must specify a source disk!"    
     set source_partition $source_disk-part1
     set -e source_disk #hide variable to prevent accidental writing of entire disk
     echo "Source boot partition: $source_partition $source_disk"
 
-    not_empty $target_disk; or set target_disk $TARGET_DISK
-    not_empty $target_disk; or panic "must specify a target disk!"
-    echo "Target: $target_disk"
+    not_empty $destination_disk; or set destination_disk $DESTINATION_DISK
+    not_empty $destination_disk; or panic "must specify a target disk!"
+    echo "Target: $destination_disk"
 
-    string match -q "*Force*" $target_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
+    string match -q "*Force*" $destination_disk; and panic "I think this Eternal's HD. If you're so sure it's not, then edit me."
     confirm "Wanna do this?"; or exit 1
     echo "Let's go!"
 
     zpool export nupool
-    zpool detach bpool $target_disk-part2
-    zpool detach rpool $target_disk-part3
+    zpool detach bpool $destination_disk-part2
+    zpool detach rpool $destination_disk-part3
+    umount /mnt/rpool/boot
+    umount /mnt/rpool
 
     confirm "Format the disk?"; and begin
         echo "gonna format the disk"
-        prep_new_disk $target_disk $source_partition
+        prep_new_disk $destination_disk $source_partition
     end
     
-    # confirm "Join boot pool on partition 2?"; and begin
-    #     echo "Joining boot pool"
-    #     join_pool bpool $boot_pool_disk $target_disk 2
-    # end
+    confirm "Join boot pool on partition 2?"; and begin
+        echo "Joining boot pool"
+        join_pool bpool $boot_pool_disk $destination_disk 2
+    end
 
     # confirm "Join root pool on partition 3?"; and begin
-        # echo "Joining root pool"
-        # join_root_pool $target_disk 3
+    #     echo "Joining root pool"
+    #     join_root_pool $destination_disk 3
     # end
 
     not_empty $source_snapshot; or set source_snapshot $SOURCE_SNAPSHOT
@@ -188,9 +202,10 @@ function main -a source_disk target_disk source_dataset source_snapshot -d "Eter
     not_empty $source_dataset; or set source_dataset rpool/ROOT/eternity
 
     confirm "Create new root instead? (from $source_dataset@$source_snapshot"; and begin
-        create_pool nupool $target_disk 2
-        zpool export nupool
-        zpool import -N -R /mnt/nupool nupool
+        zpool destroy nupool
+        create_pool nupool $destination_disk 3
+        # zpool export nupool
+        # zpool import -N -R /mnt/nupool nupool
         
         zfs create -o canmount=off -o mountpoint=none nupool/ROOT
         
